@@ -174,6 +174,7 @@ static int rubicson_callback(uint8_t bb[BITBUF_ROWS][BITBUF_COLS]) {
     /* FIXME validate the received message better, figure out crc */
     if (bb[1][0] == bb[2][0] && bb[2][0] == bb[3][0] && bb[3][0] == bb[4][0] &&
         bb[4][0] == bb[5][0] && bb[5][0] == bb[6][0] && bb[6][0] == bb[7][0] && bb[7][0] == bb[8][0] &&
+	(bb[0][1] != 0 || bb[0][2] != 0 || bb[0][3] != 0 || bb[0][4] != 0) &&
         bb[8][0] == bb[9][0] && (bb[5][0] != 0 && bb[5][1] != 0 && bb[5][2] != 0)) {
 
         /* Nible 3,4,5 contains 12 bits of temperature
@@ -424,6 +425,55 @@ static int ws2000_callback(uint8_t bb[BITBUF_ROWS][BITBUF_COLS]) {
     return 1;
 }
 
+uint8_t bcd_decode8(uint8_t x) {
+  return ((x & 0xF0) >> 4) * 10 + (x & 0x0F);
+}
+
+uint8_t reverse8(uint8_t x) {
+   x = (x & 0xF0) >> 4 | (x & 0x0F) << 4;
+   x = (x & 0xCC) >> 2 | (x & 0x33) << 2;
+   x = (x & 0xAA) >> 1 | (x & 0x55) << 1;
+   return x;
+}
+
+static int silverws_callback(uint8_t bb[BITBUF_ROWS][BITBUF_COLS]) {
+    int temperature_before_dec;
+    int temperature_after_dec;
+    int16_t temp;
+    int16_t rid;
+    /* FIXME validate the received message better, figure out crc */
+    if (bb[1][0] == bb[2][0] && bb[2][0] == bb[3][0] && bb[3][0] == bb[4][0] &&
+        bb[4][0] == bb[5][0] && bb[5][0] == bb[6][0] && bb[6][0] == bb[7][0] &&
+        (bb[1][4] & 0xf) == 0 && (bb[3][4] & 0xf) == 0 && (bb[5][4] & 0xf) == 0 && (bb[5][0] != 0 && bb[5][1] != 0)) {
+
+        rid = bb[1][0];
+	temp = (int16_t)((uint16_t)(reverse8(bb[1][1]) >> 4) | (reverse8(bb[1][2])<<4));
+        if ((temp & 0x800) != 0) { temp |= 0xf000; }
+        temperature_before_dec = abs(temp / 10);
+        temperature_after_dec = abs(temp % 10);
+
+        fprintf(stderr, "Sensor temperature event:\n");
+        fprintf(stderr, "protocol      = Silvercrest Weather (2008)\n");
+        fprintf(stderr, "button        = %d\n",bb[1][1]&0x10?1:0);
+        fprintf(stderr, "battery       = %s\n",bb[1][1]&0x20?"Low":"OK");
+    /* FIXME Figure out which numbers represent HH and LL temperature values*/
+        fprintf(stderr, "temp          = %s%d.%d\n",temp<0?"-":"",temperature_before_dec, temperature_after_dec);
+        fprintf(stderr, "humidity      = %d\n", bcd_decode8(reverse8(bb[1][3])));
+        fprintf(stderr, "channel       = %d\n", (rid & 0xc) >> 2);
+        fprintf(stderr, "id            = %d\n",(bb[1][0]&0xF3));
+        fprintf(stderr, "rid           = %d\n", rid);
+        fprintf(stderr, "hrid          = %02x\n", rid);
+
+        fprintf(stderr, "%02x %02x %02x %02x %02x\n",bb[1][0],bb[1][1],bb[1][2],bb[1][3],bb[1][4]);
+
+        if (debug_output)
+            debug_callback(bb);
+
+        return 1;
+    }
+    return 0;
+}
+
 
 // timings based on samp_rate=1024000
 r_device rubicson = {
@@ -525,6 +575,16 @@ r_device steffen = {
     /* .long_limit     = */ 270,
     /* .reset_limit    = */ 1500,
     /* .json_callback  = */ &steffen_callback,
+};
+
+r_device silver_ws = {
+    /* .id             = */ 10,
+    /* .name           = */ "Silvercrest Weather Sensor (2008)",
+    /* .modulation     = */ OOK_PWM_D,
+    /* .short_limit    = */ 3500/4,
+    /* .long_limit     = */ 7000/4,
+    /* .reset_limit    = */ 15000/4,
+    /* .json_callback  = */ &silverws_callback,
 };
 
 
@@ -1391,6 +1451,7 @@ int main(int argc, char **argv)
     register_protocol(demod, &elv_ws2000);
     register_protocol(demod, &waveman);
     register_protocol(demod, &steffen);
+    register_protocol(demod, &silver_ws);
 
     if (argc <= optind-1) {
         usage();
