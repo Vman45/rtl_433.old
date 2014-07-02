@@ -523,7 +523,7 @@ static int auriol2013b_callback(uint8_t bb[BITBUF_ROWS][BITBUF_COLS]) {
 
     int temperature_before_dec;
     int temperature_after_dec;
-    static char * temp_states[4] = {"stable/reset", "rising", "falling", "unknown"};
+    static char * temp_states[4] = {"stable/reset", "increasing", "decreasing", "unknown"};
     int16_t temp;
     int16_t rid;
     static const int16_t t0=0x4C4, t_div=9, t_mul=5; 
@@ -545,7 +545,6 @@ static int auriol2013b_callback(uint8_t bb[BITBUF_ROWS][BITBUF_COLS]) {
         /* Nible 3,4,5 contains 12 bits of temperature
          * The temperature is signed and scaled by 10 */
         temp = (int16_t)((uint16_t)(bb[i][2] << 4) | ((bb[i][3] & 0xf0) >> 4));
-        fprintf(stderr, "%04x\n", temp);
         temp = ((temp - t0) * t_mul)/t_div;
         temperature_before_dec = abs(temp / 10);
         temperature_after_dec = abs(temp % 10);
@@ -569,6 +568,34 @@ static int auriol2013b_callback(uint8_t bb[BITBUF_ROWS][BITBUF_COLS]) {
     }
     return 0;
 }
+
+static int silverwdb_callback(uint8_t bb[BITBUF_ROWS][BITBUF_COLS]) {
+    int i=0, j, errors=0;
+    static const int MAX_ERRORS=16; //Maximum number of errors in frame
+
+    if (bb[1][0] == bb[2][1] && bb[3][2] == bb[4][3] && bb[1][0] == 0 && bb[3][2] == 0) { 
+      return 0; // Empty frame
+    } 
+
+    for(i=2; i < BITBUF_ROWS; i++) { //Button press fills all rows in bb with same values
+      for (j=0; j < 3 ; j++) {
+        if (bb[i][j] != bb[i-1][j]) { errors++; } //Allow small number of reception errors
+      }
+      if (bb[i][3] & 0x7f || errors > MAX_ERRORS ) { return 0; } // More than 25 bits set
+    } 
+
+    /* Pretty sure this is a Silvercrest remote */
+    fprintf(stderr, "Remote button event:\n");
+    fprintf(stderr, "model = Silvercrest Wireless Doorbell\n");
+    fprintf(stderr, "id    = %02x%02x%02x%02x\n",bb[1][0],bb[1][1],bb[1][2],bb[1][3]);
+    fprintf(stderr, "%02x %02x %02x %02x\n",bb[1][0],bb[1][1],bb[1][2],bb[1][3]);
+
+    if (debug_output)
+        debug_callback(bb);
+
+    return 1;
+}
+
 
 // timings based on samp_rate=1024000
 r_device rubicson = {
@@ -684,7 +711,7 @@ r_device silver_ws = {
 };
 
 
-/* Auriol Temperature/Humidity Sensor Version: 01/2013, IAN 85059, Model: Z31130-TXi, Board: HQ-TX001(MB) R-1 */
+/* Auriol Temperature/Humidity Sensor Version: 01/2013, IAN 85059, Model: Z31130-TX, Board: HQ-TX001(MB) R-1 */
 r_device auriol_2013a = {
     /* .id             = */ 15,
     /* .name           = */ "Auriol Weather Sensor (01/2013)",
@@ -695,7 +722,7 @@ r_device auriol_2013a = {
     /* .json_callback  = */ &auriol2013a_callback,
 };
 
-/* Auriol Temperature/Humidity Sensor Version: 12/2013, IAN 96414, Model: Z31915-TXi, Board: TX06K-THC V2 */
+/* Auriol Temperature/Humidity Sensor Version: 12/2013, IAN 96414, Model: Z31915-TX, Board: TX06K-THC V2 */
 r_device auriol_2013b = {
     /* .id             = */ 16,
     /* .name           = */ "Auriol Weather Sensor (12/2013)",
@@ -704,6 +731,17 @@ r_device auriol_2013b = {
     /* .long_limit     = */ 1200,//1750
     /* .reset_limit    = */ 4800,
     /* .json_callback  = */ &auriol2013b_callback,
+};
+
+/* Silvercrest Wireless Doorbell Version: 06/2013, IAN 89970, Model: Z30914-TX */
+r_device silverwdb_2013 = {
+    /* .id             = */ 17,
+    /* .name           = */ "Silvercrest Wireless Doorbell",
+    /* .modulation     = */ OOK_PWM_P,
+    /* .short_limit    = */ 220, 
+    /* .long_limit     = */ 1850,
+    /* .reset_limit    = */ 7580,
+    /* .json_callback  = */ &silverwdb_callback,
 };
 
 
@@ -1574,6 +1612,7 @@ int main(int argc, char **argv)
     register_protocol(demod, &silver_ws);
     register_protocol(demod, &auriol_2013a);
     register_protocol(demod, &auriol_2013b);
+    register_protocol(demod, &silverwdb_2013);
 
     if (argc <= optind-1) {
         usage();
