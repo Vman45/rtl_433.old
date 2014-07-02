@@ -474,6 +474,101 @@ static int silverws_callback(uint8_t bb[BITBUF_ROWS][BITBUF_COLS]) {
     return 0;
 }
 
+static int auriol2013a_callback(uint8_t bb[BITBUF_ROWS][BITBUF_COLS]) {
+    int temperature_before_dec;
+    int temperature_after_dec;
+    int16_t temp, humidity;
+    int16_t rid;
+
+    /* FIXME validate the received message better, figure out crc */
+    if (bb[1][0] == bb[2][0] && bb[2][0] == bb[3][0] && bb[3][0] == bb[4][0] &&
+        bb[4][0] == bb[5][0] && bb[5][0] == bb[6][0] && bb[6][0] == bb[7][0] && bb[7][0] == bb[8][0] &&
+        (bb[1][4] & 0xf) == 0 && (bb[3][4] & 0xf) == 0 && (bb[5][4] & 0xf) == 0 && (bb[5][0] != 0 && bb[5][1] != 0)) {
+
+        rid = bb[1][0];
+        humidity = ((bb[1][3]&0x0F)<<4)|(bb[1][4]>>4);
+        /* Nible 3,4,5 contains 12 bits of temperature
+         * The temperature is signed and scaled by 10 */
+        temp = (int16_t)((uint16_t)(bb[1][1] << 12) | (bb[1][2] << 4));
+        temp = temp >> 4;
+        temperature_before_dec = abs(temp / 10);
+        temperature_after_dec = abs(temp % 10);
+
+        fprintf(stderr, "Sensor temperature event:\n");
+        fprintf(stderr, "protocol      = Auriol Weather (01/2013)\n");
+        fprintf(stderr, "battery       = %s\n",bb[1][1]&0x80?"OK":"Low");
+        fprintf(stderr, "temp          = %s%d.%d\n",temp<0?"-":"",temperature_before_dec, temperature_after_dec);
+        if (humidity != 0) { fprintf(stderr, "humidity      = %d\n", humidity); }
+        fprintf(stderr, "channel       = %d\n", ((bb[1][1] & 0x30) >> 4) + 1);
+        fprintf(stderr, "rid           = %d\n", rid);
+        fprintf(stderr, "hrid          = %02x\n", rid);
+
+        fprintf(stderr, "%02x %02x %02x %02x %02x\n",bb[1][0],bb[1][1],bb[1][2],bb[1][3],bb[1][4]);
+
+        if (debug_output)
+            debug_callback(bb);
+
+        return 1;
+    }
+    return 0;
+}
+
+
+static int auriol2013b_callback(uint8_t bb[BITBUF_ROWS][BITBUF_COLS]) {
+/* Frame format: ID SX TT TH HC: 
+   ID - Identifier, S - State (T0, T_UP, T_DOWN), 
+   T - temperature (in Farenheit, reference value is -90F), multiplied by 10
+   H - BCD-encoded humidity, C - channel
+*/
+
+    int temperature_before_dec;
+    int temperature_after_dec;
+    static char * temp_states[4] = {"stable/reset", "rising", "falling", "unknown"};
+    int16_t temp;
+    int16_t rid;
+    static const int16_t t0=0x4C4, t_div=9, t_mul=5; 
+
+    int i = 1;
+     
+    while (bb[i][5] != 0) { 
+      fprintf(stderr, "Auriol 12/2013: overrun (packet %i)\n", i);
+      i+=2;
+      if (i > 5) { return 0; } 
+    }
+
+    /* FIXME validate the received message better, figure out crc */
+    if (bb[i][0] == bb[7][0] &&  bb[5][0] == bb[7][0] && bb[7][0] == bb[9][0]&& 
+	(bb[1][1] != 0 || bb[1][2] != 0 || bb[1][3] != 0 || bb[1][4] != 0) &&
+        (bb[5][0] != 0 && bb[5][1] != 0)) {
+
+        rid = bb[1][0];
+        /* Nible 3,4,5 contains 12 bits of temperature
+         * The temperature is signed and scaled by 10 */
+        temp = (int16_t)((uint16_t)(bb[i][2] << 4) | ((bb[i][3] & 0xf0) >> 4));
+        fprintf(stderr, "%04x\n", temp);
+        temp = ((temp - t0) * t_mul)/t_div;
+        temperature_before_dec = abs(temp / 10);
+        temperature_after_dec = abs(temp % 10);
+
+        fprintf(stderr, "Sensor temperature event:\n");
+        fprintf(stderr, "protocol      = Auriol Weather (12/2013)\n");
+        fprintf(stderr, "trend         = %s\n",temp_states[(bb[i][1])&0x3]);
+        //fprintf(stderr, "battery       = %s\n",bb[i][1]&0x80?"OK":"Low");
+        fprintf(stderr, "temp          = %s%d.%d\n",temp<0?"-":"",temperature_before_dec, temperature_after_dec);
+        fprintf(stderr, "humidity      = %d\n", bcd_decode8(((bb[i][3]&0x0F)<<4)|(bb[i][4]>>4)));
+        fprintf(stderr, "channel       = %d\n", bb[i][4] & 0x3);
+        fprintf(stderr, "rid           = %d\n", rid);
+        fprintf(stderr, "hrid          = %02x\n", rid);
+
+        fprintf(stderr, "%02x %02x %02x %02x %02x\n",bb[i][0],bb[i][1],bb[i][2],bb[i][3],bb[i][4]);
+
+        if (debug_output)
+            debug_callback(bb);
+
+        return 1;
+    }
+    return 0;
+}
 
 // timings based on samp_rate=1024000
 r_device rubicson = {
@@ -577,8 +672,9 @@ r_device steffen = {
     /* .json_callback  = */ &steffen_callback,
 };
 
+/* Silvercrest Temperature/Humidity sensor with display (also Hyundai?) Version: ??/2008, IAN ???, Model: */
 r_device silver_ws = {
-    /* .id             = */ 10,
+    /* .id             = */ 14,
     /* .name           = */ "Silvercrest Weather Sensor (2008)",
     /* .modulation     = */ OOK_PWM_D,
     /* .short_limit    = */ 3500/4,
@@ -586,6 +682,30 @@ r_device silver_ws = {
     /* .reset_limit    = */ 15000/4,
     /* .json_callback  = */ &silverws_callback,
 };
+
+
+/* Auriol Temperature/Humidity Sensor Version: 01/2013, IAN 85059, Model: Z31130-TXi, Board: HQ-TX001(MB) R-1 */
+r_device auriol_2013a = {
+    /* .id             = */ 15,
+    /* .name           = */ "Auriol Weather Sensor (01/2013)",
+    /* .modulation     = */ OOK_PWM_D,
+    /* .short_limit    = */ 1744/4,
+    /* .long_limit     = */ 3500/4,
+    /* .reset_limit    = */ 5000/4,
+    /* .json_callback  = */ &auriol2013a_callback,
+};
+
+/* Auriol Temperature/Humidity Sensor Version: 12/2013, IAN 96414, Model: Z31915-TXi, Board: TX06K-THC V2 */
+r_device auriol_2013b = {
+    /* .id             = */ 16,
+    /* .name           = */ "Auriol Weather Sensor (12/2013)",
+    /* .modulation     = */ OOK_PWM_D,
+    /* .short_limit    = */ 800, 
+    /* .long_limit     = */ 1200,//1750
+    /* .reset_limit    = */ 4800,
+    /* .json_callback  = */ &auriol2013b_callback,
+};
+
 
 
 struct protocol_state {
@@ -1452,6 +1572,8 @@ int main(int argc, char **argv)
     register_protocol(demod, &waveman);
     register_protocol(demod, &steffen);
     register_protocol(demod, &silver_ws);
+    register_protocol(demod, &auriol_2013a);
+    register_protocol(demod, &auriol_2013b);
 
     if (argc <= optind-1) {
         usage();
