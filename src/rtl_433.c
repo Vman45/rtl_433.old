@@ -440,6 +440,7 @@ static int silverws_callback(uint8_t bb[BITBUF_ROWS][BITBUF_COLS]) {
     int temperature_before_dec;
     int temperature_after_dec;
     int16_t temp;
+    uint8_t humidity;
     int16_t rid;
     /* FIXME validate the received message better, figure out crc */
     if (bb[1][0] == bb[2][0] && bb[2][0] == bb[3][0] && bb[3][0] == bb[4][0] &&
@@ -451,6 +452,9 @@ static int silverws_callback(uint8_t bb[BITBUF_ROWS][BITBUF_COLS]) {
         if ((temp & 0x800) != 0) { temp |= 0xf000; }
         temperature_before_dec = abs(temp / 10);
         temperature_after_dec = abs(temp % 10);
+        humidity = bcd_decode8(reverse8(bb[1][3]));
+
+        if (temperature_before_dec < -40 || temperature_before_dec > 100 || humidity < 15 || humidity > 100) { return 0; } //Sanity checks for other sensors
 
         fprintf(stderr, "Sensor temperature event:\n");
         fprintf(stderr, "protocol      = Silvercrest Weather (2008)\n");
@@ -458,7 +462,7 @@ static int silverws_callback(uint8_t bb[BITBUF_ROWS][BITBUF_COLS]) {
         fprintf(stderr, "battery       = %s\n",bb[1][1]&0x20?"Low":"OK");
     /* FIXME Figure out which numbers represent HH and LL temperature values*/
         fprintf(stderr, "temp          = %s%d.%d\n",temp<0?"-":"",temperature_before_dec, temperature_after_dec);
-        fprintf(stderr, "humidity      = %d\n", bcd_decode8(reverse8(bb[1][3])));
+        fprintf(stderr, "humidity      = %d\n", humidity); 
         fprintf(stderr, "channel       = %d\n", (rid & 0xc) >> 2);
         fprintf(stderr, "id            = %d\n",(bb[1][0]&0xF3));
         fprintf(stderr, "rid           = %d\n", rid);
@@ -486,13 +490,15 @@ static int auriol2013a_callback(uint8_t bb[BITBUF_ROWS][BITBUF_COLS]) {
         (bb[1][4] & 0xf) == 0 && (bb[3][4] & 0xf) == 0 && (bb[5][4] & 0xf) == 0 && (bb[5][0] != 0 && bb[5][1] != 0)) {
 
         rid = bb[1][0];
-        humidity = ((bb[1][3]&0x0F)<<4)|(bb[1][4]>>4);
         /* Nible 3,4,5 contains 12 bits of temperature
          * The temperature is signed and scaled by 10 */
         temp = (int16_t)((uint16_t)(bb[1][1] << 12) | (bb[1][2] << 4));
         temp = temp >> 4;
         temperature_before_dec = abs(temp / 10);
         temperature_after_dec = abs(temp % 10);
+        humidity = ((bb[1][3]&0x0F)<<4)|(bb[1][4]>>4);
+
+        if (temperature_before_dec < -40 || temperature_before_dec > 100 || humidity > 100) { return 0; } //Sanity checks due to other sensors
 
         fprintf(stderr, "Sensor temperature event:\n");
         fprintf(stderr, "protocol      = Auriol Weather (01/2013)\n");
@@ -524,7 +530,7 @@ static int auriol2013b_callback(uint8_t bb[BITBUF_ROWS][BITBUF_COLS]) {
     int temperature_before_dec;
     int temperature_after_dec;
     static char * temp_states[4] = {"stable/reset", "increasing", "decreasing", "unknown"};
-    int16_t temp;
+    int16_t temp, humidity;
     int16_t rid;
     static const int16_t t0=0x4C4, t_div=9, t_mul=5; 
 
@@ -538,23 +544,26 @@ static int auriol2013b_callback(uint8_t bb[BITBUF_ROWS][BITBUF_COLS]) {
 
     /* FIXME validate the received message better, figure out crc */
     if (bb[i][0] == bb[7][0] &&  bb[5][0] == bb[7][0] && bb[7][0] == bb[9][0]&& 
-	(bb[1][1] != 0 || bb[1][2] != 0 || bb[1][3] != 0 || bb[1][4] != 0) &&
+	(bb[i][1] != 0 || bb[i][2] != 0 || bb[i][3] != 0 || bb[i][4] != 0) &&
         (bb[5][0] != 0 && bb[5][1] != 0)) {
 
-        rid = bb[1][0];
+        rid = bb[i][0];
         /* Nible 3,4,5 contains 12 bits of temperature
          * The temperature is signed and scaled by 10 */
         temp = (int16_t)((uint16_t)(bb[i][2] << 4) | ((bb[i][3] & 0xf0) >> 4));
         temp = ((temp - t0) * t_mul)/t_div;
         temperature_before_dec = abs(temp / 10);
         temperature_after_dec = abs(temp % 10);
+        humidity = bcd_decode8(((bb[i][3]&0x0F)<<4)|(bb[i][4]>>4));
+
+        if (temperature_before_dec < -40 || temperature_before_dec > 100 || humidity > 100) { return 0; } //Sanity checks due to other sensors
 
         fprintf(stderr, "Sensor temperature event:\n");
         fprintf(stderr, "protocol      = Auriol Weather (12/2013)\n");
         fprintf(stderr, "trend         = %s\n",temp_states[(bb[i][1])&0x3]);
         //fprintf(stderr, "battery       = %s\n",bb[i][1]&0x80?"OK":"Low");
         fprintf(stderr, "temp          = %s%d.%d\n",temp<0?"-":"",temperature_before_dec, temperature_after_dec);
-        fprintf(stderr, "humidity      = %d\n", bcd_decode8(((bb[i][3]&0x0F)<<4)|(bb[i][4]>>4)));
+        if (humidity != 0) { fprintf(stderr, "humidity      = %d\n", humidity); }
         fprintf(stderr, "channel       = %d\n", bb[i][4] & 0x3);
         fprintf(stderr, "rid           = %d\n", rid);
         fprintf(stderr, "hrid          = %02x\n", rid);
@@ -571,17 +580,20 @@ static int auriol2013b_callback(uint8_t bb[BITBUF_ROWS][BITBUF_COLS]) {
 
 static int silverwdb_callback(uint8_t bb[BITBUF_ROWS][BITBUF_COLS]) {
     int i=0, j, errors=0;
-    static const int MAX_ERRORS=16; //Maximum number of errors in frame
+    static const int MAX_ERRORS=16, MAX_ROWS=32; //Maximum number of errors in frame and packets
 
-    if (bb[1][0] == bb[2][1] && bb[3][2] == bb[4][3] && bb[1][0] == 0 && bb[3][2] == 0) { 
-      return 0; // Empty frame
-    } 
+    /*if ((bb[1][1] == bb[1][2] && bb[1][2] == bb[1][3] && bb[1][1] == 0) || 
+        (bb[1][0] == 0xff && bb[1][1] == 0xff && bb[1][2] == 0xff && bb[1][3] & 0x80) ||
+        (bb[1][0] == 0xff && bb[1][2] == 0 && bb[1][3] == 0)) { 
+      return 0; // Empty/invalid frame
+    } */
 
-    for(i=2; i < BITBUF_ROWS; i++) { //Button press fills all rows in bb with same values
+    for(i=2; i < MAX_ROWS; i++) { //Button press fills all rows in bb with same values
+      if (bb[i][0] == 0 && bb[i][1] == 0 && bb[i][2] == 0 && bb[i][3] == 0) { errors +=4; }
       for (j=0; j < 3 ; j++) {
         if (bb[i][j] != bb[i-1][j]) { errors++; } //Allow small number of reception errors
       }
-      if (bb[i][3] & 0x7f || errors > MAX_ERRORS ) { return 0; } // More than 25 bits set
+      if ((bb[i][3] & 0x7f) || errors > MAX_ERRORS ) { return 0; } // More than 25 bits set or error number exceeded
     } 
 
     /* Pretty sure this is a Silvercrest remote */
@@ -743,7 +755,6 @@ r_device silverwdb_2013 = {
     /* .reset_limit    = */ 7580,
     /* .json_callback  = */ &silverwdb_callback,
 };
-
 
 
 struct protocol_state {
