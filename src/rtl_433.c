@@ -638,7 +638,7 @@ static int unknown_temp_callback(uint8_t bb[BITBUF_ROWS][BITBUF_COLS]) {
         if ((temp2 & 0x800) != 0) { temp2 |= 0xf000; }
 
         fprintf(stderr, "Sensor temperature event:\n");
-        fprintf(stderr, "protocol      = Remote Temp Traansmitter\n");
+        fprintf(stderr, "protocol      = Remote Temp Transmitter\n");
         fprintf(stderr, "button        = %d\n",bb[1][3]&0x01?1:0);
         fprintf(stderr, "battery       = %s\n",bb[1][3]&0x02?"Ok":"Low");
         fprintf(stderr, "temp          = %s%d.%d\n",temp2<0?"-":"",abs((int16_t)temp2/10),abs((int16_t)temp2%10));
@@ -810,7 +810,7 @@ r_device silverwdb_2013 = {
    Decoding outdoor wireless weather station sensor data by kcotar      */
 r_device unknown_temp = {
     /* .id             = */ 19,
-    /* .name           = */ "Remote Temp Traansmitter", //Really written this way on supplied photo
+    /* .name           = */ "Remote Temp Transmitter", 
     /* .modulation     = */ OOK_PWM_D,
     /* .short_limit    = */ 3500/4,
     /* .long_limit     = */ 7000/4,
