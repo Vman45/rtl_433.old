@@ -85,7 +85,7 @@
 #define MINIMAL_BUF_LENGTH      512
 #define MAXIMAL_BUF_LENGTH      (256 * 16384)
 #define FILTER_ORDER            1
-#define MAX_PROTOCOLS           10
+#define MAX_PROTOCOLS           20
 #define SIGNAL_GRABBER_BUFFER   (12 * DEFAULT_BUF_LENGTH)
 #define BITBUF_COLS             34
 #define BITBUF_ROWS             50
@@ -608,6 +608,56 @@ static int silverwdb_callback(uint8_t bb[BITBUF_ROWS][BITBUF_COLS]) {
     return 1;
 }
 
+static uint8_t unknown_temp_chksum(uint8_t bb[BITBUF_ROWS][BITBUF_COLS], uint8_t limit, uint8_t crc_pos) {
+  int i=0;
+  uint8_t sum = 0;
+  if (limit > BITBUF_COLS) { limit = BITBUF_COLS; }
+  for (i=0; i < 2 * limit ; i+=2 ) {
+     if(i != crc_pos) { sum += (bb[1][i/2]&0xf0)>>4; }
+     if(i+1 != crc_pos) { sum += bb[1][i/2]&0xf; }
+  }
+  return (--sum & 0xf);
+}
+
+static int unknown_temp_callback(uint8_t bb[BITBUF_ROWS][BITBUF_COLS]) {
+    int rid;
+
+    int16_t temp2;
+
+    /* FIXME validate the received message better */
+    if (((((bb[1][0] ^ bb[2][0]) & 0xf) == 0) && ((bb[1][1] ^ bb[2][1]) & 0xf0) == 0) && 
+        ((((bb[1][0] ^ bb[2][0]) & 0xf) == 0) && ((bb[1][1] ^ bb[2][1]) & 0xf0) == 0) &&
+          (bb[1][3]&0xF) == 0 && bb[1][4] == 0 && (bb[1][3] & 0xf0) &&
+          (bb[2][3]&0xF) == 0 && bb[2][4] == 0 && (bb[2][3] & 0xf0) && 
+          (bb[3][3]&0xF) == 0 && bb[3][4] == 0 && (bb[3][3] & 0xf0) &&
+          (((bb[1][0] & 0xf0) >> 4) == unknown_temp_chksum(bb, 4, 0))
+    ) {
+
+        /* Prologue sensor */
+        temp2 = (int16_t)((uint16_t)((bb[1][1] & 0xf) << 8) | bb[1][2]);
+        if ((temp2 & 0x800) != 0) { temp2 |= 0xf000; }
+
+        fprintf(stderr, "Sensor temperature event:\n");
+        fprintf(stderr, "protocol      = Remote Temp Traansmitter\n");
+        fprintf(stderr, "button        = %d\n",bb[1][3]&0x01?1:0);
+        fprintf(stderr, "battery       = %s\n",bb[1][3]&0x02?"Ok":"Low");
+        fprintf(stderr, "temp          = %s%d.%d\n",temp2<0?"-":"",abs((int16_t)temp2/10),abs((int16_t)temp2%10));
+        fprintf(stderr, "channel       = %d\n",(bb[1][1]&0x0c)>>2);
+        rid = ((bb[1][0]&0x0F)<<4)|(bb[1][1]&0xF0)>>4;
+        fprintf(stderr, "rid           = %d\n", rid);
+        fprintf(stderr, "hrid          = %02x\n", rid);
+//        fprintf(stderr, "checksum      = %02x (calculated: %02x)\n", (bb[1][0] & 0xf0) >> 4, unknown_temp_chksum(bb, 4, 0));
+
+        fprintf(stderr, "%02x %02x %02x %02x %02x\n",bb[1][0],bb[1][1],bb[1][2],bb[1][3],bb[1][4]);
+
+        if (debug_output)
+            debug_callback(bb);
+
+        return 1;
+    }
+    return 0;
+}
+
 
 // timings based on samp_rate=1024000
 r_device rubicson = {
@@ -754,6 +804,18 @@ r_device silverwdb_2013 = {
     /* .long_limit     = */ 1850,
     /* .reset_limit    = */ 7580,
     /* .json_callback  = */ &silverwdb_callback,
+};
+
+/* Captured in sensor data, same sensor with frame format described in
+   Decoding outdoor wireless weather station sensor data by kcotar      */
+r_device unknown_temp = {
+    /* .id             = */ 19,
+    /* .name           = */ "Remote Temp Traansmitter", //Really written this way on supplied photo
+    /* .modulation     = */ OOK_PWM_D,
+    /* .short_limit    = */ 3500/4,
+    /* .long_limit     = */ 7000/4,
+    /* .reset_limit    = */ 15000/4,
+    /* .json_callback  = */ &unknown_temp_callback,
 };
 
 
@@ -1624,6 +1686,7 @@ int main(int argc, char **argv)
     register_protocol(demod, &auriol_2013a);
     register_protocol(demod, &auriol_2013b);
     register_protocol(demod, &silverwdb_2013);
+    register_protocol(demod, &unknown_temp);
 
     if (argc <= optind-1) {
         usage();
