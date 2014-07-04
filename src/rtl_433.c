@@ -266,7 +266,7 @@ static int waveman_callback(uint8_t bb[BITBUF_ROWS][BITBUF_COLS]) {
 static int steffen_callback(uint8_t bb[BITBUF_ROWS][BITBUF_COLS]) {
 
     if (bb[0][0]==0x00 && ((bb[1][0]&0x07)==0x07) && bb[1][0]==bb[2][0] && bb[2][0]==bb[3][0]) {
-        
+
         fprintf(stderr, "Remote button event:\n");
         fprintf(stderr, "model   = Steffan Switch Transmitter\n");
 	fprintf(stderr, "code    = %d%d%d%d%d\n", (bb[1][0]&0x80)>>7, (bb[1][0]&0x40)>>6, (bb[1][0]&0x20)>>5, (bb[1][0]&0x10)>>4, (bb[1][0]&0x08)>>3);
@@ -440,35 +440,74 @@ static int silverws_callback(uint8_t bb[BITBUF_ROWS][BITBUF_COLS]) {
     int temperature_before_dec;
     int temperature_after_dec;
     int16_t temp;
-    uint8_t humidity;
+    uint8_t humidity, csum=0xf;
     int16_t rid;
-    /* FIXME validate the received message better, figure out crc */
+    int i;
     if (bb[1][0] == bb[2][0] && bb[2][0] == bb[3][0] && bb[3][0] == bb[4][0] &&
         bb[4][0] == bb[5][0] && bb[5][0] == bb[6][0] && bb[6][0] == bb[7][0] &&
         (bb[1][4] & 0xf) == 0 && (bb[3][4] & 0xf) == 0 && (bb[5][4] & 0xf) == 0 && (bb[5][0] != 0 && bb[5][1] != 0)) {
 
+        for (i=0; i < 4; i++) {
+          uint8_t tmp = reverse8(bb[1][i]);
+          csum -= (tmp & 0xf) + ((tmp & 0xf0) >> 4);
+        }
+        csum = reverse8((csum & 0xf) << 4);
+        if (csum != (bb[1][4] >> 4)) { return 0; } //Invalid checksum
+
         rid = bb[1][0];
-	temp = (int16_t)((uint16_t)(reverse8(bb[1][1]) >> 4) | (reverse8(bb[1][2])<<4));
-        if ((temp & 0x800) != 0) { temp |= 0xf000; }
-        temperature_before_dec = abs(temp / 10);
-        temperature_after_dec = abs(temp % 10);
-        humidity = bcd_decode8(reverse8(bb[1][3]));
 
-        if (temperature_before_dec < -40 || temperature_before_dec > 100 || humidity < 15 || humidity > 100) { return 0; } //Sanity checks for other sensors
+        if ((bb[1][1] & 0xe0) == 0x60) {
+          uint8_t rainfall = 0;
+          if ((bb[1][1] & 0xf) == 0xc) { rainfall = 1; }
+          fprintf(stderr, "Sensor %s event (untested!):\n", rainfall?"rainfall":"wind");
+          fprintf(stderr, "protocol      = Silvercrest Weather (2008)/Auriol (2011)\n");
+          fprintf(stderr, "button        = %d\n",bb[1][1]&0x10?1:0);
+          fprintf(stderr, "battery       = %s\n",bb[1][1]&0x20?"Low":"OK");
+          if (rainfall) {
+	     /* Untested code written according to the specification, may not decode correctly  */
+             double rain_mm = (reverse8(bb[1][2]) + (reverse8(bb[1][3] << 8))) * 0.25;
+             fprintf(stderr, "rainfall      = %f\n", rain_mm);
+          } else {
+            int skip=-1;
+	    /* Untested code written according to the specification, may not decode correctly  */
+            if ((bb[1][1]&0xe) == 0x80 && bb[1][2] == 0) { skip = 0; }
+            else if ((bb[1][1]&0xe) == 0xe) { skip = 1; }
+            if (skip > 0) {
+              double speed = reverse8(bb[1+skip][3]) * 0.2;
+              double gust = reverse8(bb[2+skip][3]) * 0.2;
+	      int direction = (reverse8(bb[2+skip][2]) << 1) | (bb[2+skip][1] & 0x1);
+              fprintf(stderr, "wind speed    = %f\n", speed);
+              fprintf(stderr, "wind gust     = %f\n", gust);
+              fprintf(stderr, "direction     = %i\n", direction);
+            }
+          }
+        } else {
+    	  static char * temp_states[4] = {"stable", "increasing", "decreasing", "invalid"};
+	  temp = (int16_t)((uint16_t)(reverse8(bb[1][1]) >> 4) | (reverse8(bb[1][2])<<4));
+          if ((temp & 0x800) != 0) { temp |= 0xf000; }
+          temperature_before_dec = abs(temp / 10);
+          temperature_after_dec = abs(temp % 10);
+          humidity = bcd_decode8(reverse8(bb[1][3]));
 
-        fprintf(stderr, "Sensor temperature event:\n");
-        fprintf(stderr, "protocol      = Silvercrest Weather (2008)\n");
-        fprintf(stderr, "button        = %d\n",bb[1][1]&0x10?1:0);
-        fprintf(stderr, "battery       = %s\n",bb[1][1]&0x20?"Low":"OK");
-    /* FIXME Figure out which numbers represent HH and LL temperature values*/
-        fprintf(stderr, "temp          = %s%d.%d\n",temp<0?"-":"",temperature_before_dec, temperature_after_dec);
-        fprintf(stderr, "humidity      = %d\n", humidity); 
-        fprintf(stderr, "channel       = %d\n", (rid & 0xc) >> 2);
-        fprintf(stderr, "id            = %d\n",(bb[1][0]&0xF3));
+          if (temperature_before_dec < -40 || temperature_before_dec > 100 || humidity < 15 || humidity > 100) { return 0; } //Sanity checks for other sensors
+
+          fprintf(stderr, "Sensor temperature event:\n");
+          fprintf(stderr, "protocol      = Silvercrest Weather (2008)/Auriol (2011)\n");
+          fprintf(stderr, "trend         = %s\n",temp_states[(bb[1][1]&0x60) >> 5]);
+          fprintf(stderr, "button        = %d\n",bb[1][1]&0x10?1:0);
+          fprintf(stderr, "battery       = %s\n",bb[1][1]&0x20?"Low":"OK");
+      /* FIXME Figure out which numbers represent HH and LL temperature values*/
+          fprintf(stderr, "temp          = %s%d.%d\n",temp<0?"-":"",temperature_before_dec, temperature_after_dec);
+          fprintf(stderr, "humidity      = %d\n", humidity);
+          fprintf(stderr, "channel       = %d\n", (rid & 0xc) >> 2);
+          fprintf(stderr, "id            = %d\n",(bb[1][0]&0xF3));
+        }
         fprintf(stderr, "rid           = %d\n", rid);
         fprintf(stderr, "hrid          = %02x\n", rid);
+        //fprintf(stderr, "checksum      = %01x (calculated %01x)\n", bb[1][4] >> 4, csum);
 
         fprintf(stderr, "%02x %02x %02x %02x %02x\n",bb[1][0],bb[1][1],bb[1][2],bb[1][3],bb[1][4]);
+        //fprintf(stderr, "L2M: %02x %02x %02x %02x %02x\n",reverse8(bb[1][0]),reverse8(bb[1][1]),reverse8(bb[1][2]),reverse8(bb[1][3]),reverse8(bb[1][4]));
 
         if (debug_output)
             debug_callback(bb);
@@ -521,8 +560,8 @@ static int auriol2013a_callback(uint8_t bb[BITBUF_ROWS][BITBUF_COLS]) {
 
 
 static int auriol2013b_callback(uint8_t bb[BITBUF_ROWS][BITBUF_COLS]) {
-/* Frame format: ID SX TT TH HC: 
-   ID - Identifier, S - State (T0, T_UP, T_DOWN), 
+/* Frame format: ID SX TT TH HC:
+   ID - Identifier, S - State (T0, T_UP, T_DOWN),
    T - temperature (in Farenheit, reference value is -90F), multiplied by 10
    H - BCD-encoded humidity, C - channel
 */
@@ -532,18 +571,18 @@ static int auriol2013b_callback(uint8_t bb[BITBUF_ROWS][BITBUF_COLS]) {
     static char * temp_states[4] = {"stable/reset", "increasing", "decreasing", "unknown"};
     int16_t temp, humidity;
     int16_t rid;
-    static const int16_t t0=0x4C4, t_div=9, t_mul=5; 
+    static const int16_t t0=0x4C4, t_div=9, t_mul=5;
 
     int i = 1;
-     
-    while (bb[i][5] != 0) { 
+
+    while (bb[i][5] != 0) {
       fprintf(stderr, "Auriol 12/2013: overrun (packet %i)\n", i);
       i+=2;
-      if (i > 5) { return 0; } 
+      if (i > 5) { return 0; }
     }
 
     /* FIXME validate the received message better, figure out crc */
-    if (bb[i][0] == bb[7][0] &&  bb[5][0] == bb[7][0] && bb[7][0] == bb[9][0]&& 
+    if (bb[i][0] == bb[7][0] &&  bb[5][0] == bb[7][0] && bb[7][0] == bb[9][0]&&
 	(bb[i][1] != 0 || bb[i][2] != 0 || bb[i][3] != 0 || bb[i][4] != 0) &&
         (bb[5][0] != 0 && bb[5][1] != 0)) {
 
@@ -582,9 +621,9 @@ static int silverwdb_callback(uint8_t bb[BITBUF_ROWS][BITBUF_COLS]) {
     int i=0, j, errors=0;
     static const int MAX_ERRORS=16, MAX_ROWS=32; //Maximum number of errors in frame and packets
 
-    /*if ((bb[1][1] == bb[1][2] && bb[1][2] == bb[1][3] && bb[1][1] == 0) || 
+    /*if ((bb[1][1] == bb[1][2] && bb[1][2] == bb[1][3] && bb[1][1] == 0) ||
         (bb[1][0] == 0xff && bb[1][1] == 0xff && bb[1][2] == 0xff && bb[1][3] & 0x80) ||
-        (bb[1][0] == 0xff && bb[1][2] == 0 && bb[1][3] == 0)) { 
+        (bb[1][0] == 0xff && bb[1][2] == 0 && bb[1][3] == 0)) {
       return 0; // Empty/invalid frame
     } */
 
@@ -594,7 +633,7 @@ static int silverwdb_callback(uint8_t bb[BITBUF_ROWS][BITBUF_COLS]) {
         if (bb[i][j] != bb[i-1][j]) { errors++; } //Allow small number of reception errors
       }
       if ((bb[i][3] & 0x7f) || errors > MAX_ERRORS ) { return 0; } // More than 25 bits set or error number exceeded
-    } 
+    }
 
     /* Pretty sure this is a Silvercrest remote */
     fprintf(stderr, "Remote button event:\n");
@@ -625,10 +664,10 @@ static int unknown_temp_callback(uint8_t bb[BITBUF_ROWS][BITBUF_COLS]) {
     int16_t temp2;
 
     /* FIXME validate the received message better */
-    if (((((bb[1][0] ^ bb[2][0]) & 0xf) == 0) && ((bb[1][1] ^ bb[2][1]) & 0xf0) == 0) && 
+    if (((((bb[1][0] ^ bb[2][0]) & 0xf) == 0) && ((bb[1][1] ^ bb[2][1]) & 0xf0) == 0) &&
         ((((bb[1][0] ^ bb[2][0]) & 0xf) == 0) && ((bb[1][1] ^ bb[2][1]) & 0xf0) == 0) &&
           (bb[1][3]&0xF) == 0 && bb[1][4] == 0 && (bb[1][3] & 0xf0) &&
-          (bb[2][3]&0xF) == 0 && bb[2][4] == 0 && (bb[2][3] & 0xf0) && 
+          (bb[2][3]&0xF) == 0 && bb[2][4] == 0 && (bb[2][3] & 0xf0) &&
           (bb[3][3]&0xF) == 0 && bb[3][4] == 0 && (bb[3][3] & 0xf0) &&
           (((bb[1][0] & 0xf0) >> 4) == unknown_temp_chksum(bb, 4, 0))
     ) {
@@ -642,7 +681,7 @@ static int unknown_temp_callback(uint8_t bb[BITBUF_ROWS][BITBUF_COLS]) {
         fprintf(stderr, "button        = %d\n",bb[1][3]&0x01?1:0);
         fprintf(stderr, "battery       = %s\n",bb[1][3]&0x02?"Ok":"Low");
         fprintf(stderr, "temp          = %s%d.%d\n",temp2<0?"-":"",abs((int16_t)temp2/10),abs((int16_t)temp2%10));
-        fprintf(stderr, "channel       = %d\n",(bb[1][1]&0x0c)>>2);
+        fprintf(stderr, "channel       = %d\n",(bb[1][3]&0x0c)>>2);
         rid = ((bb[1][0]&0x0F)<<4)|(bb[1][1]&0xF0)>>4;
         fprintf(stderr, "rid           = %d\n", rid);
         fprintf(stderr, "hrid          = %02x\n", rid);
@@ -761,7 +800,7 @@ r_device steffen = {
     /* .json_callback  = */ &steffen_callback,
 };
 
-/* Silvercrest Temperature/Humidity sensor with display (also Hyundai?) Version: ??/2008, IAN ???, Model: */
+/* Silvercrest Temperature/Humidity sensor with display (also Hama, Ventus, Meteoscan, ...) Version: 11/2008, Model: H13716A-TX*/
 r_device silver_ws = {
     /* .id             = */ 14,
     /* .name           = */ "Silvercrest Weather Sensor (2008)",
@@ -789,7 +828,7 @@ r_device auriol_2013b = {
     /* .id             = */ 16,
     /* .name           = */ "Auriol Weather Sensor (12/2013)",
     /* .modulation     = */ OOK_PWM_D,
-    /* .short_limit    = */ 800, 
+    /* .short_limit    = */ 800,
     /* .long_limit     = */ 1200,//1750
     /* .reset_limit    = */ 4800,
     /* .json_callback  = */ &auriol2013b_callback,
@@ -800,7 +839,7 @@ r_device silverwdb_2013 = {
     /* .id             = */ 17,
     /* .name           = */ "Silvercrest Wireless Doorbell",
     /* .modulation     = */ OOK_PWM_P,
-    /* .short_limit    = */ 220, 
+    /* .short_limit    = */ 220,
     /* .long_limit     = */ 1850,
     /* .reset_limit    = */ 7580,
     /* .json_callback  = */ &silverwdb_callback,
@@ -810,7 +849,7 @@ r_device silverwdb_2013 = {
    Decoding outdoor wireless weather station sensor data by kcotar      */
 r_device unknown_temp = {
     /* .id             = */ 19,
-    /* .name           = */ "Remote Temp Transmitter", 
+    /* .name           = */ "Remote Temp Transmitter",
     /* .modulation     = */ OOK_PWM_D,
     /* .short_limit    = */ 3500/4,
     /* .long_limit     = */ 7000/4,
