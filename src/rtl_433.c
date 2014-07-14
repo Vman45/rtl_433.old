@@ -443,9 +443,8 @@ static int silverws_callback(uint8_t bb[BITBUF_ROWS][BITBUF_COLS]) {
     uint8_t humidity, csum=0xf;
     int16_t rid;
     int i;
-    if (bb[1][0] == bb[2][0] && bb[2][0] == bb[3][0] && bb[3][0] == bb[4][0] &&
-        bb[4][0] == bb[5][0] && bb[5][0] == bb[6][0] && bb[6][0] == bb[7][0] &&
-        (bb[1][4] & 0xf) == 0 && (bb[3][4] & 0xf) == 0 && (bb[5][4] & 0xf) == 0 && (bb[5][0] != 0 && bb[5][1] != 0)) {
+    if (bb[1][0] == bb[5][0] && bb[2][0] == bb[6][0] && (bb[1][4] & 0xf) == 0  && (bb[5][4] & 0xf) == 0
+        && (bb[5][0] != 0 && bb[5][1] != 0)) {
 
         for (i=0; i < 4; i++) {
           uint8_t tmp = reverse8(bb[1][i]);
@@ -455,33 +454,35 @@ static int silverws_callback(uint8_t bb[BITBUF_ROWS][BITBUF_COLS]) {
         if (csum != (bb[1][4] >> 4)) { return 0; } //Invalid checksum
 
         rid = bb[1][0];
+        uint8_t wind = 0;
 
         if ((bb[1][1] & 0xe0) == 0x60) {
-          uint8_t rainfall = 0;
-          if ((bb[1][1] & 0xf) == 0xc) { rainfall = 1; }
-          fprintf(stderr, "Sensor %s event (untested!):\n", rainfall?"rainfall":"wind");
+          wind = ((bb[1][1] & 0xf) == 0xc)?0:1;
+
+          fprintf(stderr, "Sensor %s event :\n", wind?"wind":"(untested) rainfall");
           fprintf(stderr, "protocol      = Silvercrest Weather (2008)/Auriol (2011)\n");
           fprintf(stderr, "button        = %d\n",bb[1][1]&0x10?1:0);
           fprintf(stderr, "battery       = %s\n",bb[1][1]&0x20?"Low":"OK");
-          if (rainfall) {
+          if (wind) {
+            int skip=-1;
+	    /* Untested code written according to the specification, may not decode correctly  */
+            if ((bb[1][1]&0xe) == 0x8 && bb[1][2] == 0) { skip = 0; }
+            else if ((bb[1][1]&0xe) == 0xe) { skip = 4; } //According to supplied data!
+            if (skip >= 0) {
+              double speed = reverse8(bb[1+skip][3]) * 0.2;
+              double gust = reverse8(bb[5+skip][3]) * 0.2;
+	      int direction = (reverse8(bb[5+skip][2]) << 1) | (bb[5+skip][1] & 0x1);
+              fprintf(stderr, "wind speed    = %.2f\n", speed);
+              fprintf(stderr, "wind gust     = %.2f\n", gust);
+              fprintf(stderr, "direction     = %.2i\n", direction);
+            }
+          } else {
 	     /* Untested code written according to the specification, may not decode correctly  */
              double rain_mm = (reverse8(bb[1][2]) + (reverse8(bb[1][3] << 8))) * 0.25;
              fprintf(stderr, "rainfall      = %f\n", rain_mm);
-          } else {
-            int skip=-1;
-	    /* Untested code written according to the specification, may not decode correctly  */
-            if ((bb[1][1]&0xe) == 0x80 && bb[1][2] == 0) { skip = 0; }
-            else if ((bb[1][1]&0xe) == 0xe) { skip = 1; }
-            if (skip > 0) {
-              double speed = reverse8(bb[1+skip][3]) * 0.2;
-              double gust = reverse8(bb[2+skip][3]) * 0.2;
-	      int direction = (reverse8(bb[2+skip][2]) << 1) | (bb[2+skip][1] & 0x1);
-              fprintf(stderr, "wind speed    = %f\n", speed);
-              fprintf(stderr, "wind gust     = %f\n", gust);
-              fprintf(stderr, "direction     = %i\n", direction);
-            }
           }
-        } else {
+        } else if (bb[2][0] == bb[3][0] && bb[3][0] == bb[4][0] && bb[4][0] == bb[5][0] &&
+                    bb[5][0] == bb[6][0] && (bb[3][4] & 0xf) == 0 && (bb[5][4] & 0xf) == 0 ) {
     	  static char * temp_states[4] = {"stable", "increasing", "decreasing", "invalid"};
 	  temp = (int16_t)((uint16_t)(reverse8(bb[1][1]) >> 4) | (reverse8(bb[1][2])<<4));
           if ((temp & 0x800) != 0) { temp |= 0xf000; }
@@ -507,6 +508,7 @@ static int silverws_callback(uint8_t bb[BITBUF_ROWS][BITBUF_COLS]) {
         //fprintf(stderr, "checksum      = %01x (calculated %01x)\n", bb[1][4] >> 4, csum);
 
         fprintf(stderr, "%02x %02x %02x %02x %02x\n",bb[1][0],bb[1][1],bb[1][2],bb[1][3],bb[1][4]);
+        if (wind) fprintf(stderr, "%02x %02x %02x %02x %02x\n",bb[5][0],bb[5][1],bb[5][2],bb[5][3],bb[5][4]);
         //fprintf(stderr, "L2M: %02x %02x %02x %02x %02x\n",reverse8(bb[1][0]),reverse8(bb[1][1]),reverse8(bb[1][2]),reverse8(bb[1][3]),reverse8(bb[1][4]));
 
         if (debug_output)
