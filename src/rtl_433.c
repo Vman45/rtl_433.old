@@ -631,17 +631,22 @@ static int silverwdb_callback(uint8_t bb[BITBUF_ROWS][BITBUF_COLS]) {
 
     for(i=2; i < MAX_ROWS; i++) { //Button press fills all rows in bb with same values
       if (bb[i][0] == 0 && bb[i][1] == 0 && bb[i][2] == 0 && bb[i][3] == 0) { errors +=4; }
-      for (j=0; j < 3 ; j++) {
+      for (j=0; j < 6 ; j++) {
         if (bb[i][j] != bb[i-1][j]) { errors++; } //Allow small number of reception errors
       }
-      if ((bb[i][3] & 0x7f) || errors > MAX_ERRORS ) { return 0; } // More than 25 bits set or error number exceeded
+      if ((bb[i][3] & 0x7f && bb[i][5] == 0) || errors > MAX_ERRORS ) { return 0; } // More than 25 bits set or error number exceeded
     }
 
     /* Pretty sure this is a Silvercrest remote */
     fprintf(stderr, "Remote button event:\n");
     fprintf(stderr, "model = Silvercrest Wireless Doorbell\n");
-    fprintf(stderr, "id    = %02x%02x%02x%02x\n",bb[1][0],bb[1][1],bb[1][2],bb[1][3]);
-    fprintf(stderr, "%02x %02x %02x %02x\n",bb[1][0],bb[1][1],bb[1][2],bb[1][3]);
+    if (bb[i][3] & 0x7f && bb[i][4] != 0 && bb[i][5] != 0) {
+      fprintf(stderr, "id    = %02x%02x%02x%02x%02x%02x\n",bb[1][0],bb[1][1],bb[1][2],bb[1][3],bb[1][4],bb[1][5]);
+      fprintf(stderr, "%02x %02x %02x %02x %02x %02x\n",bb[1][0],bb[1][1],bb[1][2],bb[1][3],bb[1][4],bb[1][5]);
+    } else {
+      fprintf(stderr, "id    = %02x%02x%02x%02x\n",bb[1][0],bb[1][1],bb[1][2],bb[1][3]);
+      fprintf(stderr, "%02x %02x %02x %02x\n",bb[1][0],bb[1][1],bb[1][2],bb[1][3]);
+    }
 
     if (debug_output)
         debug_callback(bb);
@@ -839,7 +844,7 @@ r_device auriol_2013b = {
 /* Silvercrest Wireless Doorbell Version: 06/2013, IAN 89970, Model: Z30914-TX */
 r_device silverwdb_2013 = {
     /* .id             = */ 17,
-    /* .name           = */ "Silvercrest Wireless Doorbell",
+    /* .name           = */ "Silvercrest Wireless Doorbell (06/2013)",
     /* .modulation     = */ OOK_PWM_P,
     /* .short_limit    = */ 220,
     /* .long_limit     = */ 1850,
@@ -857,6 +862,17 @@ r_device unknown_temp = {
     /* .long_limit     = */ 7000/4,
     /* .reset_limit    = */ 15000/4,
     /* .json_callback  = */ &unknown_temp_callback,
+};
+
+/* Silvercrest Wireless Doorbell Version: 12/2013, IAN 53605, Model: Z31370-TX */
+r_device silverwdb_2013b = {
+    /* .id             = */ 20,
+    /* .name           = */ "Silvercrest Wireless Doorbell (12/2013)",
+    /* .modulation     = */ OOK_PWM_D,
+    /* .short_limit    = */ 100,
+    /* .long_limit     = */ 250,
+    /* .reset_limit    = */ 500,
+    /* .json_callback  = */ &silverwdb_callback,
 };
 
 
@@ -1728,6 +1744,7 @@ int main(int argc, char **argv)
     register_protocol(demod, &auriol_2013b);
     register_protocol(demod, &silverwdb_2013);
     register_protocol(demod, &unknown_temp);
+    register_protocol(demod, &silverwdb_2013b);
 
     if (argc <= optind-1) {
         usage();
