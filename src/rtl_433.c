@@ -969,6 +969,7 @@ sighandler(int signum)
 #else
 static void sighandler(int signum)
 {
+    if (signum == SIGPIPE) { signal(SIGPIPE, SIG_IGN); }
     fprintf(stderr, "Signal caught, exiting!\n");
     do_exit = 1;
     rtlsdr_cancel_async(dev);
