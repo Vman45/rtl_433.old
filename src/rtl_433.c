@@ -468,7 +468,7 @@ static int silverws_callback(uint8_t bb[BITBUF_ROWS][BITBUF_COLS]) {
         if ((bb[1][1] & 0xe0) == 0x60) {
           wind = ((bb[1][1] & 0xf) == 0xc)?0:1;
 
-          fprintf(stderr, "Sensor %s event :\n", wind?"wind":"rainfall");
+          fprintf(stderr, "Sensor %s event:\n", wind?"wind":"rainfall");
           fprintf(stderr, "protocol      = Silvercrest Weather (2008)/Auriol (2011)\n");
           fprintf(stderr, "button        = %d\n",bb[1][1]&0x10?1:0);
           fprintf(stderr, "battery       = %s\n",bb[1][1]&0x80?"Low":"OK");
