@@ -462,7 +462,7 @@ static int silverws_callback(uint8_t bb[BITBUF_ROWS][BITBUF_COLS]) {
           fprintf(stderr, "Sensor %s event :\n", wind?"wind":"(untested) rainfall");
           fprintf(stderr, "protocol      = Silvercrest Weather (2008)/Auriol (2011)\n");
           fprintf(stderr, "button        = %d\n",bb[1][1]&0x10?1:0);
-          fprintf(stderr, "battery       = %s\n",bb[1][1]&0x20?"Low":"OK");
+          fprintf(stderr, "battery       = %s\n",bb[1][1]&0x80?"Low":"OK");
           if (wind) {
             int skip=-1;
 	    /* Untested code written according to the specification, may not decode correctly  */
@@ -496,7 +496,7 @@ static int silverws_callback(uint8_t bb[BITBUF_ROWS][BITBUF_COLS]) {
           fprintf(stderr, "protocol      = Silvercrest Weather (2008)/Auriol (2011)\n");
           fprintf(stderr, "trend         = %s\n",temp_states[(bb[1][1]&0x60) >> 5]);
           fprintf(stderr, "button        = %d\n",bb[1][1]&0x10?1:0);
-          fprintf(stderr, "battery       = %s\n",bb[1][1]&0x20?"Low":"OK");
+          fprintf(stderr, "battery       = %s\n",bb[1][1]&0x80?"Low":"OK");
       /* FIXME Figure out which numbers represent HH and LL temperature values*/
           fprintf(stderr, "temp          = %s%d.%d\n",temp<0?"-":"",temperature_before_dec, temperature_after_dec);
           fprintf(stderr, "humidity      = %d\n", humidity);
@@ -969,7 +969,6 @@ sighandler(int signum)
 #else
 static void sighandler(int signum)
 {
-    if (signum == SIGPIPE) { signal(SIGPIPE, SIG_IGN); }
     fprintf(stderr, "Signal caught, exiting!\n");
     do_exit = 1;
     rtlsdr_cancel_async(dev);
