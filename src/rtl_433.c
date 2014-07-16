@@ -440,7 +440,7 @@ static int silverws_callback(uint8_t bb[BITBUF_ROWS][BITBUF_COLS]) {
     int temperature_before_dec;
     int temperature_after_dec;
     int16_t temp;
-    uint8_t humidity, csum=0xf;
+    uint8_t humidity, csum=0, csum2=0;
     int16_t rid;
     int i;
     if (bb[1][0] == bb[5][0] && bb[2][0] == bb[6][0] && (bb[1][4] & 0xf) == 0  && (bb[5][4] & 0xf) == 0
@@ -448,10 +448,19 @@ static int silverws_callback(uint8_t bb[BITBUF_ROWS][BITBUF_COLS]) {
 
         for (i=0; i < 4; i++) {
           uint8_t tmp = reverse8(bb[1][i]);
-          csum -= (tmp & 0xf) + ((tmp & 0xf0) >> 4);
+          csum += (tmp & 0xf) + ((tmp & 0xf0) >> 4);
+
+          tmp = reverse8(bb[5][i]);
+          csum2 += (tmp & 0xf) + ((tmp & 0xf0) >> 4);
         }
-        csum = reverse8((csum & 0xf) << 4);
-        if (csum != (bb[1][4] >> 4)) { return 0; } //Invalid checksum
+
+        csum  = ((bb[1][1] & 0x7f) == 0x6c)?(csum+0x7):(0xf-csum);
+        csum2 = ((bb[5][1] & 0x7f) == 0x6c)?(csum2+0x7):(0xf-csum2);
+
+        csum  = reverse8((csum & 0xf) << 4);
+        csum2 = reverse8((csum2 & 0xf) << 4);
+
+        if (csum != (bb[1][4] >> 4) || csum2 != (bb[5][4] >> 4)) { return 0; } //Invalid checksum
 
         rid = bb[1][0];
         uint8_t wind = 0;
@@ -459,7 +468,7 @@ static int silverws_callback(uint8_t bb[BITBUF_ROWS][BITBUF_COLS]) {
         if ((bb[1][1] & 0xe0) == 0x60) {
           wind = ((bb[1][1] & 0xf) == 0xc)?0:1;
 
-          fprintf(stderr, "Sensor %s event :\n", wind?"wind":"(untested) rainfall");
+          fprintf(stderr, "Sensor %s event :\n", wind?"wind":"rainfall");
           fprintf(stderr, "protocol      = Silvercrest Weather (2008)/Auriol (2011)\n");
           fprintf(stderr, "button        = %d\n",bb[1][1]&0x10?1:0);
           fprintf(stderr, "battery       = %s\n",bb[1][1]&0x80?"Low":"OK");
@@ -586,7 +595,7 @@ static int auriol2013b_callback(uint8_t bb[BITBUF_ROWS][BITBUF_COLS]) {
     /* FIXME validate the received message better, figure out crc */
     if (bb[i][0] == bb[7][0] &&  bb[5][0] == bb[7][0] && bb[7][0] == bb[9][0]&&
 	(bb[i][1] != 0 || bb[i][2] != 0 || bb[i][3] != 0 || bb[i][4] != 0) &&
-        (bb[5][0] != 0 && bb[5][1] != 0)) {
+        (bb[5][0] != 0 && bb[5][1] != 0) && (bb[i][4] & 0x3) != 0 ) {
 
         rid = bb[i][0];
         /* Nible 3,4,5 contains 12 bits of temperature
