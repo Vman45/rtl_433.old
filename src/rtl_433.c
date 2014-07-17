@@ -143,6 +143,8 @@ static int debug_callback(uint8_t bb[BITBUF_ROWS][BITBUF_COLS]) {
     return 0;
 }
 
+static int auriol2013a_callback(uint8_t bb[BITBUF_ROWS][BITBUF_COLS]);
+
 static int silvercrest_callback(uint8_t bb[BITBUF_ROWS][BITBUF_COLS]) {
     /* FIXME validate the received message better */
     if (bb[1][0] == 0xF8 &&
@@ -195,8 +197,9 @@ static int rubicson_callback(uint8_t bb[BITBUF_ROWS][BITBUF_COLS]) {
             debug_callback(bb);
 
         return 1;
+    } else {
+        return auriol2013a_callback(bb);
     }
-    return 0;
 }
 
 static int prologue_callback(uint8_t bb[BITBUF_ROWS][BITBUF_COLS]) {
@@ -537,6 +540,7 @@ static int auriol2013a_callback(uint8_t bb[BITBUF_ROWS][BITBUF_COLS]) {
     /* FIXME validate the received message better, figure out crc */
     if (bb[1][0] == bb[2][0] && bb[2][0] == bb[3][0] && bb[3][0] == bb[4][0] &&
         bb[4][0] == bb[5][0] && bb[5][0] == bb[6][0] && bb[6][0] == bb[7][0] && bb[7][0] == bb[8][0] &&
+	(bb[1][3] & 0xf0) == 0xf0 && (bb[3][3] & 0xf0) == 0xf0 && (bb[5][3] & 0xf0) == 0xf0 &&
         (bb[1][4] & 0xf) == 0 && (bb[3][4] & 0xf) == 0 && (bb[5][4] & 0xf) == 0 && (bb[5][0] != 0 && bb[5][1] != 0)) {
 
         rid = bb[1][0];
@@ -833,9 +837,9 @@ r_device auriol_2013a = {
     /* .id             = */ 15,
     /* .name           = */ "Auriol Weather Sensor (01/2013)",
     /* .modulation     = */ OOK_PWM_D,
-    /* .short_limit    = */ 1744/4,
-    /* .long_limit     = */ 3500/4,
-    /* .reset_limit    = */ 5000/4,
+    /* .short_limit    = */ 250,
+    /* .long_limit     = */ 750,
+    /* .reset_limit    = */ 1500,
     /* .json_callback  = */ &auriol2013a_callback,
 };
 
