@@ -490,7 +490,7 @@ static int silverws_callback(uint8_t bb[BITBUF_ROWS][BITBUF_COLS]) {
             }
           } else {
 	     /* Untested code written according to the specification, may not decode correctly  */
-             double rain_mm = (reverse8(bb[1][2]) + (reverse8(bb[1][3] << 8))) * 0.25;
+             double rain_mm = (reverse8(bb[1][2]) + (reverse8(bb[1][3]) << 8)) * 0.25;
              fprintf(stderr, "rainfall      = %f\n", rain_mm);
           }
         } else if (bb[2][0] == bb[3][0] && bb[3][0] == bb[4][0] && bb[4][0] == bb[5][0] &&
